@@ -1,36 +1,79 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# wabot — אוטומציות וואטסאפ לעסקים, עם פאנל ניהול
 
-## Getting Started
+מערכת אחת שמחליפה את n8n: מנוע אוטומציות, קביעת תורים, תזכורות, Inbox ופאנל ניהול בעברית.
+וואטסאפ מחובר דרך [Kapso](https://kapso.com). כל הלוגיקה והנתונים אצלך.
 
-First, run the development server:
+## הרצה מקומית (בלי שום חשבון חיצוני)
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+פותחים http://localhost:3000, יוצרים משתמש מנהל (עם עסק הדגמה), ונכנסים ל"בדיקת הבוט".
+הסימולטור מריץ את אותו מנוע שעונה בוואטסאפ, כך שאפשר לבדוק הכל לפני שמחברים מספר.
+בלי `DATABASE_URL` הנתונים נשמרים במסד מובנה בתיקייה `.data`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+בדיקות: `npm test` (16 בדיקות למנוע: קביעה, התנגשויות, ביטול, תזכורות, AI).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## מה יש במערכת
 
-## Learn More
+| מסך | מה עושים בו |
+|---|---|
+| כל העסקים (מנהל) | רשימת העסקים, סטטוס חיבור, הודעות, תורים, שגיאות, הוספת עסק, מצב משתני הסביבה |
+| היום | התורים של היום, מה מחכה לטיפול, אירועים אחרונים |
+| תורים | תורים קרובים לפי יום, ביטול, הוספה ידנית |
+| שיחות | כל השיחות, מענה ידני, השהיית הבוט בשיחה |
+| אוטומציות | הפעלה/כיבוי, עריכת כל הודעה, הוספה מתבנית |
+| בדיקת הבוט | סימולטור צ'אט |
+| הגדרות | פרטי עסק, שירותים, שעות פעילות, תזכורות, AI, חיבור וואטסאפ, משתמש לבעל העסק |
+| יומן אירועים | מה הבוט עשה ומה נכשל |
 
-To learn more about Next.js, take a look at the following resources:
+שני סוגי משתמשים: **מנהל** (רואה הכל) ו**בעל עסק** (רואה רק את העסק שלו; ההרשאה נבדקת בשרת בכל עמוד, פעולה ו-API).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### תבניות אוטומציה (`src/engine/templates.ts`)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- **קביעת תורים**: תפריט → שירות → יום פנוי → שעה פנויה → שם → אישור → תור + תזכורת + התראה לבעל העסק. כולל "התורים שלי" וביטול.
+- **קליטת לידים**: מופעלת במילות מפתח, שואלת שם וצורך ומתריעה לבעל העסק.
+- **תפריט מידע**: שעות, כתובת, נציג.
 
-## Deploy on Vercel
+תבנית חדשה = עוד אובייקט במערך `TEMPLATES`. סוגי השלבים מוגדרים ב-`src/engine/types.ts`.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### AI
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+כבוי כברירת מחדל, מופעל לכל עסק בהגדרות. המודל רק מסווג טקסט חופשי ("אפשר תור מחר אחרי 5?") ומחזיר רמזים.
+המנוע הסטטי בודק כל רמז מול השירותים והשעות הפנויות באמת, כך שה-AI לא יכול לקבוע תור שגוי.
+
+## פריסה חינמית: Vercel + Neon
+
+1. **Neon** (neon.tech): פרויקט חדש → מעתיקים את ה-connection string (ה-pooled).
+2. **Vercel**: מייבאים את הריפו, ומגדירים את המשתנים מ-`.env.example`:
+   `AUTH_SECRET`, `DATABASE_URL`, `APP_URL` (הכתובת ש-Vercel נתן), `KAPSO_API_KEY`, `KAPSO_WEBHOOK_SECRET`, `CRON_SECRET`.
+   הטבלאות נוצרות לבד בהרצה הראשונה.
+3. **תזכורות**: ב-Vercel אין תהליך שרץ ברקע, אז מגדירים ב-[cron-job.org](https://cron-job.org) (חינם) קריאה כל דקה אל
+   `https://<הכתובת>/api/cron/tick?key=<CRON_SECRET>`.
+4. נכנסים לכתובת, יוצרים מנהל.
+
+## חיבור Kapso
+
+1. חשבון ב-Kapso → API key → `KAPSO_API_KEY`. בוחרים מחרוזת ל-`KAPSO_WEBHOOK_SECRET`.
+2. **לבדיקות עם המספר שלך / מספר Sandbox**: בהגדרות העסק מזינים ידנית את ה-Phone Number ID מ-Kapso ולוחצים "רישום ה-webhook".
+3. **לעסק אמיתי**: "יצירת לינק חיבור" → שולחים לבעל העסק → הוא מתחבר עם פייסבוק → המספר נשמר וה-webhook נרשם לבד.
+4. **תבנית תזכורת**: יוצרים ב-Kapso תבנית (קטגוריית Utility) עם 4 משתנים בגוף: `{{1}}` שם, `{{2}}` שירות, `{{3}}` יום, `{{4}}` שעה,
+   ומזינים את שמה בהגדרות העסק. בלי תבנית, תזכורת נשלחת רק אם הלקוח כתב ב-24 השעות האחרונות.
+
+## מעבר ל-Hetzner בעתיד
+
+`npm run build && npm start` מאחורי reverse proxy, עם `DATABASE_URL` ל-Postgres. בשרת רגיל התזכורות רצות מטיימר פנימי ואין צורך ב-cron חיצוני.
+
+## החלפת ספק וואטסאפ
+
+כל הקשר ל-Kapso נמצא בשני קבצים: `src/engine/kapso.ts` (שליחה, לקוחות, לינקים) ו-`src/app/api/webhooks/kapso/route.ts` (קבלה).
+הפורמט הוא של WhatsApp Cloud API, כך שמעבר ל-Meta ישירות או ל-YCloud דורש שינוי רק בהם.
+
+## מה עוד לא קיים
+
+- **סנכרון Google Calendar**: היומן הפנימי הוא מקור האמת. סנכרון דורש אפליקציית OAuth של Google.
+- **התראות לבעל העסק בוואטסאפ** נשלחות כהודעה רגילה, ולכן מגיעות רק אם בעל העסק כתב למספר ב-24 השעות האחרונות. הן תמיד נרשמות ביומן האירועים ובמסך "היום".
+- **החיבור ל-Kapso נכתב לפי התיעוד שלהם ולא נבדק מול חשבון אמיתי.** ה-webhook נבדק עם הודעות בפורמט המתועד (חתימה, כפילויות, batch). פורמט התשובה לרשימה (`list_reply`) לא מתועד אצלם ומטופל לפי הפורמט של Meta.
+- תפוצות (broadcasts) ועורך ויזואלי לשינוי סדר השלבים.
