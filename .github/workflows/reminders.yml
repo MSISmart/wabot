@@ -1,0 +1,19 @@
+# Runs scheduled jobs (appointment reminders) on the deployed app.
+# GitHub runs this about every 5 minutes; under load it can lag a few minutes.
+# Needs the repository secret CRON_SECRET (same value as in Vercel).
+name: reminders
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Run due jobs
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then echo "CRON_SECRET repository secret is not set"; exit 1; fi
+          curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" https://wabot-eosin.vercel.app/api/cron/tick
