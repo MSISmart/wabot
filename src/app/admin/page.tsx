@@ -30,7 +30,7 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
     { ok: !!process.env.DATABASE_URL, name: "DATABASE_URL", what: "מסד נתונים קבוע (בלי זה: מסד מקומי בתיקייה ‎.data)" },
     { ok: !!process.env.AUTH_SECRET, name: "AUTH_SECRET", what: "הצפנת התחברות" },
     { ok: !!process.env.CRON_SECRET || !process.env.VERCEL, name: "CRON_SECRET", what: "הרצת תזכורות (באירוח serverless)" },
-    { ok: !!process.env.OPENAI_API_KEY && !!process.env.OPENAI_MODEL, name: "OPENAI_API_KEY + OPENAI_MODEL", what: "הבנת טקסט חופשי (לא חובה)" },
+    { ok: !!process.env.OPENAI_API_KEY, name: "OPENAI_API_KEY", what: `הבנת טקסט חופשי (לא חובה). מודל: ${process.env.OPENAI_MODEL || "gpt-4.1-nano"}` },
   ];
 
   return (

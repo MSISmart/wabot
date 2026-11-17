@@ -58,7 +58,7 @@ export default async function Inbox({ params, searchParams }: { params: Promise<
                   <button className="btn btn-quiet btn-sm">{open.conv.botPaused ? "להחזיר את הבוט לשיחה" : "להשהות את הבוט בשיחה"}</button>
                 </form>
               </div>
-              {open.conv.botPaused && <p className="bg-amber-soft px-4 py-1.5 text-sm text-amber">הבוט מושהה בשיחה הזאת. הלקוח יקבל תשובות רק ממך.</p>}
+              {open.conv.botPaused && <p className="bg-amber-soft px-4 py-1.5 text-sm text-amber">הבוט מושהה בשיחה הזאת והלקוח מקבל תשובות רק ממך. הבוט יחזור לענות לבד 12 שעות אחרי ההודעה האחרונה שלך, או כשתחזיר אותו.</p>}
               <div className="min-h-0 flex-1"><Chat key={open.conv.id} businessId={id} conversationId={open.conv.id} mode="inbox" /></div>
             </>
           ) : (

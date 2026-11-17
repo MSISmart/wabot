@@ -70,3 +70,14 @@ export async function runDueJobs(limit = 25) {
     .where(and(inArray(schema.appointments.status, ["booked", "confirmed"]), lt(schema.appointments.endAt, now)));
   return { due: due.length, done, failed };
 }
+
+let lastOpportunistic = 0;
+/**
+ * Reminders must not depend on one scheduler. Besides the external cron, any webhook or panel visit
+ * also runs due jobs, at most once a minute per server instance. Claiming makes double runs harmless.
+ */
+export function runDueJobsSoon() {
+  if (Date.now() - lastOpportunistic < 60_000) return;
+  lastOpportunistic = Date.now();
+  return runDueJobs(10).catch((e) => console.error("opportunistic tick failed", e));
+}

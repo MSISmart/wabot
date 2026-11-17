@@ -80,6 +80,8 @@ export const conversations = pgTable("conversations", {
   botPaused: boolean("bot_paused").notNull().default(false),
   needsHuman: boolean("needs_human").notNull().default(false),
   unread: integer("unread").notNull().default(0),
+  lockedUntil: ts("locked_until"),
+  botPausedAt: ts("bot_paused_at"),
   lastInboundAt: ts("last_inbound_at"),
   lastMessageAt: ts("last_message_at"),
   lastMessageText: text("last_message_text").notNull().default(""),

@@ -1,5 +1,5 @@
 import { DateTime } from "luxon";
-import { and, asc, eq, gt, inArray } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { Automation, Business, Contact, Conversation, Service } from "@/db/schema";
 import { hoursText } from "@/lib/defaults";
@@ -167,6 +167,7 @@ export class Run {
       if (r.serviceId && this.services.some((s) => s.id === r.serviceId)) this.vars.serviceId = r.serviceId;
       if (r.date && /^\d{4}-\d{2}-\d{2}$/.test(r.date)) this.vars.date = r.date;
       if (r.time && /^\d{2}:\d{2}$/.test(r.time)) this.vars.time = r.time;
+      if (r.after) this.vars._after = r.after;
     }
     this.state.retries = 0;
     await this.runFrom(this.firstOf(target));
@@ -176,7 +177,7 @@ export class Run {
   async handoff(text: string) {
     const db = await getDb();
     await this.text(text);
-    await db.update(schema.conversations).set({ botPaused: true, needsHuman: true, state: null })
+    await db.update(schema.conversations).set({ botPaused: true, botPausedAt: new Date(), needsHuman: true, state: null })
       .where(eq(schema.conversations.id, this.conversation.id));
     this.state = null;
     await notifyOwner(this.business, `לקוח מבקש נציג 🙋\n${this.contact.name || "ללא שם"} (${this.contact.waId})`);
@@ -260,10 +261,24 @@ export class Run {
           delete this.vars.date;
           return { next: this.firstOf("pick_day") };
         }
-        const page = Math.min(+(this.vars._timePage ?? 0), Math.floor((slots.length - 1) / 8));
-        const rows = slots.slice(page * 8, page * 8 + 8).map((s) => ({ id: `time:${s}`, title: s, description: "" }));
-        if (slots.length > page * 8 + 8) rows.push({ id: "time:more", title: "שעות מאוחרות יותר", description: "" });
-        else if (page > 0) rows.push({ id: "time:first", title: "חזרה לשעות הראשונות", description: "" });
+        let list = slots;
+        if (this.vars._after) {
+          const later = slots.filter((t) => t >= this.vars._after);
+          if (later.length) list = later;
+          else await this.text(`אין שעות פנויות אחרי ${this.vars._after} ב${fmtDay(this.vars.date, tz)}. אלה השעות הפנויות באותו יום:`);
+          delete this.vars._after;
+          // keep the filtered view for paging
+          if (later.length) this.vars._from = later[0];
+        } else if (this.vars._from) {
+          list = slots.filter((t) => t >= this.vars._from);
+          if (!list.length) list = slots;
+        }
+        const page = Math.min(+(this.vars._timePage ?? 0), Math.floor((list.length - 1) / 8));
+        const rows = list.slice(page * 8, page * 8 + 8).map((s) => ({ id: `time:${s}`, title: s, description: "" }));
+        if (list.length > page * 8 + 8) rows.push({ id: "time:more", title: "שעות מאוחרות יותר", description: "" });
+        else if (page > 0 || (this.vars._from && list.length < slots.length)) {
+          rows.push({ id: "time:first", title: this.vars._from && page === 0 ? "שעות מוקדמות יותר" : "חזרה לשעות הראשונות", description: "" });
+        }
         rows.push({ id: "time:back", title: "יום אחר", description: "" });
         await this.send({ type: "list", text: this.render(step.text), button: "שעות פנויות", rows });
         return { wait: true };
@@ -296,7 +311,7 @@ export class Run {
         await scheduleReminder(this.business, appt, this.now.toJSDate());
         await this.text(step.successText);
         await notifyOwner(this.business, `תור חדש 📅\n${customerName} (${this.contact.waId})\n${svc.name}, ${fmtDay(date, tz)} בשעה ${time}`);
-        for (const k of ["serviceId", "date", "time", "_dayPage", "_timePage"]) delete this.vars[k];
+        for (const k of ["serviceId", "date", "time", "_dayPage", "_timePage", "_after", "_from"]) delete this.vars[k];
         return { next: step.next };
       }
 
@@ -368,15 +383,17 @@ export class Run {
         if (!slots.length) return { retry: true, hint: `אין תורים פנויים ב${fmtDay(date, tz)}. אלה הימים הפנויים:` };
         this.vars.date = date;
         delete this.vars._timePage;
-        const time = inb.kind === "text" && /\d/.test(inb.text.replace(/\d{1,2}[./-]\d{1,2}/, "")) ? parseTime(inb.text.replace(/\d{1,2}[./-]\d{1,2}/, "")) : null;
-        if (time && slots.includes(time)) this.vars.time = time;
+        const rest = inb.kind === "text" ? inb.text.replace(/\d{1,2}[./-]\d{1,2}/, "") : "";
+        const time = /\d/.test(rest) ? parseTime(rest) : null;
+        if (time && /אחרי|מאוחר מ/.test(rest)) this.vars._after = time;
+        else if (time && slots.includes(time)) this.vars.time = time;
         return { next: step.next };
       }
 
       case "pick_time": {
         if (id === "time:more") { this.vars._timePage = String(+(this.vars._timePage ?? 0) + 1); return { reenter: true }; }
-        if (id === "time:first") { delete this.vars._timePage; return { reenter: true }; }
-        if (id === "time:back") { delete this.vars.date; delete this.vars._timePage; return { goto: this.firstOf("pick_day")! }; }
+        if (id === "time:first") { delete this.vars._timePage; delete this.vars._from; return { reenter: true }; }
+        if (id === "time:back") { delete this.vars.date; delete this.vars._timePage; delete this.vars._from; return { goto: this.firstOf("pick_day")! }; }
         const time = id.startsWith("time:") ? id.slice(5) : inb.kind === "text" ? parseTime(inb.text) : null;
         if (!time) return { retry: true, hint: "לא הצלחתי להבין את השעה. אפשר לבחור מהרשימה:" };
         const svc = this.service();
@@ -389,7 +406,7 @@ export class Run {
       case "confirm_booking": {
         if (id === "ok:yes" || /^(כן|אישור|מאשר|מאשרת|לקבוע|סבבה|יאללה)/.test(t)) return { next: step.next };
         if (id === "ok:change" || /שינוי|לשנות/.test(t)) {
-          for (const k of ["date", "time", "_dayPage", "_timePage"]) delete this.vars[k];
+          for (const k of ["date", "time", "_dayPage", "_timePage", "_after", "_from"]) delete this.vars[k];
           return { goto: this.firstOf("pick_day")! };
         }
         if (id === "ok:cancel" || /^(לא|ביטול|בטל)/.test(t)) {
@@ -471,17 +488,54 @@ export async function processInbound(
     payload: inb.replyId ? { replyId: inb.replyId } : null, waMessageId: inb.waMessageId, sentBy: "customer", status: "received",
   });
   await db.update(schema.conversations).set({
-    lastInboundAt: at, lastMessageAt: at, lastMessageText: inb.text.slice(0, 120), unread: conversation.unread + 1,
+    lastInboundAt: at, lastMessageAt: at, lastMessageText: inb.text.slice(0, 120), unread: sql`${schema.conversations.unread} + 1`,
   }).where(eq(schema.conversations.id, conversation.id));
 
-  if (!business.botEnabled || conversation.botPaused) return;
+  if (!business.botEnabled) return;
 
-  const run = new Run(business, contact, conversation, now ?? DateTime.now().setZone(business.timezone));
-  try {
-    await run.handle(inb);
-  } catch (e) {
-    await logEvent(businessId, "error", "engine_error", "שגיאה בהרצת האוטומציה", { error: e instanceof Error ? e.stack : String(e) });
-    await db.update(schema.conversations).set({ state: null }).where(eq(schema.conversations.id, conversation.id));
-    await deliver(business, conversation, contact, { type: "text", text: "משהו השתבש אצלנו 😕 אפשר לנסות שוב או לכתוב \"נציג\"." }, "system");
+  // Two messages from the same customer can arrive at the same moment (fast taps, webhook retries).
+  // Handle them one at a time so the second one sees the state the first one left behind.
+  if (!(await lockConversation(conversation.id))) {
+    await logEvent(businessId, "warn", "conversation_busy", "הודעה לא טופלה כי הודעה קודמת באותה שיחה עדיין בטיפול");
+    return;
   }
+  try {
+    const [fresh] = await db.select().from(schema.conversations).where(eq(schema.conversations.id, conversation.id)).limit(1);
+    if (fresh.botPaused) {
+      // A handoff nobody followed up on should not silence the bot forever.
+      const since = fresh.botPausedAt ? Date.now() - fresh.botPausedAt.getTime() : 0;
+      if (!fresh.botPausedAt || since < BOT_RESUME_MS) return;
+      await db.update(schema.conversations).set({ botPaused: false, botPausedAt: null, needsHuman: false, state: null })
+        .where(eq(schema.conversations.id, conversation.id));
+      fresh.botPaused = false; fresh.state = null;
+      await logEvent(businessId, "info", "bot_resumed", `הבוט חזר לענות ל-${contact.name || contact.waId} אחרי 12 שעות בלי מענה אנושי`);
+    }
+    const run = new Run(business, contact, fresh, now ?? DateTime.now().setZone(business.timezone));
+    try {
+      await run.handle(inb);
+    } catch (e) {
+      await logEvent(businessId, "error", "engine_error", "שגיאה בהרצת האוטומציה", { error: e instanceof Error ? e.stack : String(e) });
+      await db.update(schema.conversations).set({ state: null }).where(eq(schema.conversations.id, conversation.id));
+      await deliver(business, fresh, contact, { type: "text", text: "משהו השתבש אצלנו 😕 אפשר לנסות שוב או לכתוב \"נציג\"." }, "system");
+    }
+  } finally {
+    await db.update(schema.conversations).set({ lockedUntil: null }).where(eq(schema.conversations.id, conversation.id));
+  }
+}
+
+const LOCK_MS = 25_000;
+const BOT_RESUME_MS = 12 * 3600_000;
+async function lockConversation(id: string) {
+  const db = await getDb();
+  const deadline = Date.now() + LOCK_MS;
+  while (Date.now() < deadline) {
+    const now = new Date();
+    const got = await db.update(schema.conversations)
+      .set({ lockedUntil: new Date(now.getTime() + LOCK_MS) })
+      .where(and(eq(schema.conversations.id, id), or(isNull(schema.conversations.lockedUntil), lt(schema.conversations.lockedUntil, now))))
+      .returning({ id: schema.conversations.id });
+    if (got.length) return true;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return false;
 }

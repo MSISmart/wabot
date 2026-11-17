@@ -58,6 +58,8 @@ describe("static parsing", () => {
     expect(parseTime("9")).toBe("09:00");
     expect(parseTime("14:30")).toBe("14:30");
     expect(parseTime("ב-9 וחצי")).toBe("09:30");
+    expect(parseTime("ב-5")).toBe("17:00");
+    expect(parseTime("6 בבוקר")).toBe("06:00");
     expect(parseTime("אין")).toBeNull();
   });
   it("enforces WhatsApp limits in payloads", () => {
@@ -319,5 +321,84 @@ describe("other templates and AI", () => {
     await processInbound(bizId, w, "", { kind: "text", text: "היי" }, NOW);
     expect((await outbox(w)).out.length).toBe(0);
     await db.update(schema.businesses).set({ botEnabled: true }).where(eq(schema.businesses.id, bizId));
+  });
+});
+
+describe("AI parsing and prompt", () => {
+  const svcs = [{ id: "s1", name: "תספורת" }] as never[];
+  it("sanitizes model output", async () => {
+    const { parseAiJson } = await import("@/engine/ai");
+    expect(parseAiJson("not json", svcs)).toBeNull();
+    expect(parseAiJson('{"intent":"hack","date":"2026-13-45","time":"25:00"}', svcs))
+      .toMatchObject({ intent: "other", date: null, time: null });
+    expect(parseAiJson('{"intent":"book","service_id":"made-up","date":"2026-11-17","time":"10:00","after":"17:00"}', svcs))
+      .toMatchObject({ intent: "book", serviceId: null, date: "2026-11-17", time: "10:00", after: null });
+    expect(parseAiJson('```json\n{"intent":"book","service_id":"s1","after":"17:00"}\n```', svcs))
+      .toMatchObject({ serviceId: "s1", after: "17:00" });
+    // a "question" without an answer must go to a human, never to silence
+    expect(parseAiJson('{"intent":"question","answer":""}', svcs)).toMatchObject({ intent: "human" });
+  });
+  it("spells out the calendar so the model never computes dates", async () => {
+    const { buildAiPrompt } = await import("@/engine/ai");
+    const db = await getDb();
+    const [b] = await db.select().from(schema.businesses).where(eq(schema.businesses.id, bizId));
+    const p = buildAiPrompt(b, [], NOW);
+    expect(p).toContain("2026-11-17 = יום שלישי (מחר)");
+    expect(p).toContain("2026-11-19 = יום חמישי");
+    expect(p).toContain("הרצל 10");
+  });
+});
+
+describe("time preferences", () => {
+  it("'after 5' typed with the day narrows the offered times", async () => {
+    const w = newUser();
+    await say(w, "תפריט");
+    let m = await tap(w, "book");
+    m = await tap(w, rows(m)[0]);
+    m = await say(w, "ביום ראשון אחרי 3");
+    expect(rows(m)[0]).toBe("time:15:00");
+    expect(rows(m)).toContain("time:first"); // "earlier times" is still reachable
+    m = await tap(w, "time:first");
+    expect(rows(m)[0]).toBe("time:09:00");
+  });
+  it("AI 'after' hint narrows the offered times", async () => {
+    const db = await getDb();
+    const svc = (await db.select().from(schema.services).where(eq(schema.services.businessId, bizId))).find((s) => s.durationMin === 30)!;
+    setAiOverride(async () => ({ intent: "book", serviceId: svc.id, date: "2026-11-25", after: "16:00" }));
+    const w = newUser();
+    const m = await say(w, "יש משהו ביום רביעי הבא אחרי ארבע?");
+    expect(rows(m)[0]).toBe("time:16:00");
+    setAiOverride(null);
+  });
+});
+
+describe("concurrency", () => {
+  it("two messages at the same moment are handled one after the other", async () => {
+    const w = newUser();
+    await say(w, "תפריט");
+    await Promise.all([tap(w, "book"), tap(w, "book")]);
+    const { out } = await outbox(w);
+    // first tap -> service list; second tap arrives while waiting for a service -> re-prompt, never a crash or double booking
+    expect(out.filter((m) => m.type === "list" && m.button === "שירותים").length).toBeGreaterThanOrEqual(1);
+    const db = await getDb();
+    const [c] = await db.select().from(schema.contacts).where(eq(schema.contacts.waId, w));
+    const [conv] = await db.select().from(schema.conversations).where(eq(schema.conversations.contactId, c.id));
+    expect(conv.lockedUntil).toBeNull();
+  });
+});
+
+describe("handoff", () => {
+  it("the bot comes back by itself 12 hours after a handoff", async () => {
+    const w = newUser();
+    await say(w, "נציג");
+    const before = (await outbox(w)).out.length;
+    await say(w, "הלו?");
+    expect((await outbox(w)).out.length).toBe(before); // silent while a human is on it
+    const db = await getDb();
+    const { conv } = await outbox(w);
+    await db.update(schema.conversations).set({ botPausedAt: new Date(Date.now() - 13 * 3600_000) }).where(eq(schema.conversations.id, conv.id));
+    const m = await say(w, "היי");
+    expect(rows(m)).toEqual(["book", "mine", "info", "human"]);
+    expect((await outbox(w)).conv.botPaused).toBe(false);
   });
 });

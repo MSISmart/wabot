@@ -7,6 +7,7 @@ import {
 import { Flash, PageHead } from "@/components/flash";
 import { CopyField, Submit } from "@/components/ui";
 import { kapsoConfigured } from "@/engine/kapso";
+import { aiConfigured, aiModel } from "@/engine/ai";
 import { requireBusiness } from "@/lib/auth";
 import { appUrl } from "@/lib/defaults";
 import { DAY_NAMES } from "@/lib/time";
@@ -19,7 +20,7 @@ export default async function Settings({ params, searchParams }: { params: Promi
   const services = await db.select().from(schema.services).where(eq(schema.services.businessId, id)).orderBy(asc(schema.services.sort), asc(schema.services.name));
   const owners = admin ? await db.select().from(schema.users).where(and(eq(schema.users.businessId, id), eq(schema.users.role, "owner"))) : [];
   const st = b.settings;
-  const aiReady = !!process.env.OPENAI_API_KEY && !!process.env.OPENAI_MODEL;
+  const aiReady = aiConfigured();
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -32,9 +33,10 @@ export default async function Settings({ params, searchParams }: { params: Promi
           <div><label className="label" htmlFor="name">שם העסק</label><input id="name" name="name" defaultValue={b.name} required className="input" /></div>
           <div><label className="label" htmlFor="ownerPhone">וואטסאפ של בעל העסק, להתראות</label><input id="ownerPhone" name="ownerPhone" defaultValue={b.ownerPhone} dir="ltr" placeholder="972501234567" className="input" /></div>
           <div className="sm:col-span-2"><label className="label" htmlFor="address">כתובת</label><input id="address" name="address" defaultValue={b.address} className="input" /></div>
-          <div className="sm:col-span-2"><label className="label" htmlFor="about">מידע נוסף על העסק</label>
-            <textarea id="about" name="about" defaultValue={b.about} className="input" placeholder="חניה, אמצעי תשלום, מדיניות ביטולים…" />
-            <p className="hint mt-1">משמש את ה-AI כדי לענות על שאלות של לקוחות. הוא עונה רק מתוך מה שכתוב כאן.</p></div>
+          <div className="sm:col-span-2"><label className="label" htmlFor="about">מידע לעונה האוטומטי: שאלות נפוצות, מחירים, מדיניות</label>
+            <textarea id="about" name="about" defaultValue={b.about} className="input" rows={7}
+              placeholder={"חניה חינם בחניון מאחורי הבניין.\nמשלמים במזומן, אשראי או ביט.\nביטול תור עד 3 שעות לפני, בלי עלות.\nלא עושים החלקות.\nתספורת לילדים: 60 ₪, מגיל 5."} />
+            <p className="hint mt-1">ה-AI עונה ללקוחות רק מתוך מה שכתוב כאן, בשירותים ובשעות הפעילות. מה שלא כתוב, הוא מעביר לנציג במקום לנחש. כותבים עובדה אחת בכל שורה, במשפטים קצרים, כולל דברים שהעסק <strong>לא</strong> עושה.</p></div>
           <div><Submit>שמירת פרטי העסק</Submit></div>
         </form>
       </section>
@@ -102,7 +104,7 @@ export default async function Settings({ params, searchParams }: { params: Promi
           <label className="flex items-start gap-2 sm:col-span-2">
             <input type="checkbox" name="aiEnabled" defaultChecked={st.aiEnabled} className="mt-1" />
             <span>להבין הודעות חופשיות בעזרת AI
-              <span className="hint block">למשל "אפשר תור מחר אחרי 5?". ה-AI רק מבין את הבקשה. את התור קובעת תמיד הלוגיקה הרגילה, מול השעות הפנויות באמת.{!aiReady && " כרגע לא פעיל: חסרים OPENAI_API_KEY ו-OPENAI_MODEL במשתני הסביבה."}</span></span>
+              <span className="hint block">למשל "אפשר תור מחר אחרי 5?". ה-AI רק מבין את הבקשה. את התור קובעת תמיד הלוגיקה הרגילה, מול השעות הפנויות באמת.{aiReady ? ` מודל: ${aiModel()}.` : " כרגע לא פעיל: חסר OPENAI_API_KEY במשתני הסביבה."} כל מה שה-AI הבין נרשם ביומן האירועים.</span></span>
           </label>
           <div><Submit>שמירת ההגדרות</Submit></div>
         </form>

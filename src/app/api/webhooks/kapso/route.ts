@@ -1,7 +1,9 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { after } from "next/server";
 import { processInbound } from "@/engine/engine";
+import { runDueJobsSoon } from "@/engine/jobs";
 import type { Inbound } from "@/engine/types";
 import { logEvent } from "@/lib/log";
 
@@ -79,6 +81,7 @@ export async function POST(req: Request) {
     const event = req.headers.get("x-webhook-event") ?? body.type ?? "";
     const items: KapsoEvent[] = body.batch && Array.isArray(body.data) ? body.data : [body];
     for (const item of items) await handle(event, item);
+    after(() => runDueJobsSoon());
   } catch (e) {
     await logEvent(null, "error", "webhook_error", "שגיאה בעיבוד webhook", { error: e instanceof Error ? e.stack : String(e) });
     if (key) await db.delete(schema.webhookEvents).where(eq(schema.webhookEvents.key, key)); // let Kapso retry

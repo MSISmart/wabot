@@ -29,7 +29,10 @@ const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 export async function loginAction(f: FormData) {
   const db = await getDb();
   const [u] = await db.select().from(schema.users).where(eq(schema.users.email, s(f, "email").toLowerCase())).limit(1);
-  if (!u || !(await bcrypt.compare(s(f, "password"), u.passwordHash))) back("/login", "error", "אימייל או סיסמה לא נכונים");
+  if (!u || !(await bcrypt.compare(s(f, "password"), u.passwordHash))) {
+    await new Promise((r) => setTimeout(r, 700)); // slows down password guessing
+    back("/login", "error", "אימייל או סיסמה לא נכונים");
+  }
   await createSession(u.id);
   redirect("/");
 }
@@ -104,7 +107,7 @@ export async function saveBusinessAction(bid: string, f: FormData) {
   if (!name) back(`/b/${bid}/settings`, "error", "חסר שם לעסק");
   const db = await getDb();
   await db.update(schema.businesses).set({
-    name, address: s(f, "address"), about: s(f, "about").slice(0, 2000), ownerPhone: s(f, "ownerPhone").replace(/\D/g, ""),
+    name, address: s(f, "address"), about: s(f, "about").slice(0, 4000), ownerPhone: s(f, "ownerPhone").replace(/\D/g, ""),
   }).where(eq(schema.businesses.id, bid));
   back(`/b/${bid}/settings`, "ok", "פרטי העסק נשמרו");
 }
@@ -271,7 +274,7 @@ export async function addAppointmentAction(bid: string, f: FormData) {
 export async function setBotPausedAction(bid: string, cid: string, paused: boolean) {
   await requireBusiness(bid);
   const db = await getDb();
-  await db.update(schema.conversations).set({ botPaused: paused, needsHuman: false, state: null })
+  await db.update(schema.conversations).set({ botPaused: paused, botPausedAt: paused ? new Date() : null, needsHuman: false, state: null })
     .where(and(eq(schema.conversations.id, cid), eq(schema.conversations.businessId, bid)));
   revalidatePath(`/b/${bid}/inbox`);
 }

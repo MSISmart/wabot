@@ -49,7 +49,10 @@ export function parseDay(text: string, now: DateTime): string | null {
 export function parseTime(text: string): string | null {
   const m = text.match(/(\d{1,2})(?:[:.](\d{2}))?/);
   if (!m) return null;
-  const h = +m[1], min = m[2] ? +m[2] : /וחצי/.test(text) ? 30 : 0;
+  let h = +m[1];
+  const min = m[2] ? +m[2] : /וחצי/.test(text) ? 30 : /ורבע/.test(text) ? 15 : 0;
   if (h > 23 || min > 59) return null;
+  // "ב-5" to a business means 17:00, not 05:00. Mornings are written as 8, 9, 10…
+  if (h >= 1 && h <= 7 && !/בבוקר|לפנות בוקר/.test(text)) h += 12;
   return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
 }

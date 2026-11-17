@@ -36,7 +36,14 @@ async function migrate(h: Handle) {
   const done = new Set((await h.query(`SELECT name FROM app_migrations`)).map((r) => r.name as string));
   for (const m of migrations) {
     if (done.has(m.name)) continue;
-    await h.exec(`BEGIN; ${m.sql}; INSERT INTO app_migrations (name) VALUES ('${m.name}'); COMMIT;`);
+    try {
+      // The advisory lock serializes cold starts that migrate at the same moment.
+      await h.exec(`BEGIN; SELECT pg_advisory_xact_lock(727274); ${m.sql}; INSERT INTO app_migrations (name) VALUES ('${m.name}'); COMMIT;`);
+    } catch (e) {
+      await h.exec("ROLLBACK").catch(() => {});
+      const applied = await h.query(`SELECT 1 FROM app_migrations WHERE name = '${m.name}'`);
+      if (!applied.length) throw e; // a real failure, not another instance that got there first
+    }
   }
 }
 

@@ -4,10 +4,13 @@ import { getDb, schema } from "@/db";
 import { logoutAction, toggleBotAction } from "@/app/actions";
 import { NavLink } from "@/components/ui";
 import { requireBusiness } from "@/lib/auth";
+import { after } from "next/server";
+import { runDueJobsSoon } from "@/engine/jobs";
 
 export default async function BusinessLayout({ children, params }: { children: React.ReactNode; params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { user, business } = await requireBusiness(id);
+  after(() => runDueJobsSoon());
   const db = await getDb();
   const [{ n: attention }] = await db.select({ n: count() }).from(schema.conversations)
     .where(and(eq(schema.conversations.businessId, id), or(eq(schema.conversations.needsHuman, true), gt(schema.conversations.unread, 0))));
